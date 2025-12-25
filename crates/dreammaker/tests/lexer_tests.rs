@@ -15,7 +15,7 @@ fn lex(f: &str) -> Vec<Token> {
 
 fn one_token(f: &str) -> Token {
     let mut v = lex(f);
-    assert_eq!(v.len(), 2, "not one token: {:?} -> {:?}", f, v);
+    assert_eq!(v.len(), 2, "not one token: {f:?} -> {v:?}");
     assert_eq!(v[1], Punct(Newline));
     v.remove(0)
 }
@@ -23,7 +23,7 @@ fn one_token(f: &str) -> Token {
 fn float(f: &str) -> f32 {
     match one_token(f) {
         Token::Float(f) => f,
-        other => panic!("{:?}: expected float, got {:?}", f, other),
+        other => panic!("{f:?}: expected float, got {other:?}"),
     }
 }
 
@@ -33,10 +33,14 @@ fn number_literals() {
     assert_eq!(lex("0xABCDE"), vec![Int(703710), Punct(Newline)]);
     assert_eq!(lex("1e4"), vec![Float(10000.0), Punct(Newline)]);
 
-    let f = float("1.#INF"); assert!(f.is_infinite() && f > 0.);
-    let f = float("1.#IND"); assert!(f.is_nan());
-    let f = float("1#INF"); assert!(f.is_infinite() && f > 0.);
-    let f = float("1#IND"); assert!(f.is_nan());
+    let f = float("1.#INF");
+    assert!(f.is_infinite() && f > 0.);
+    let f = float("1.#IND");
+    assert!(f.is_nan());
+    let f = float("1#INF");
+    assert!(f.is_infinite() && f > 0.);
+    let f = float("1#IND");
+    assert!(f.is_nan());
 }
 
 #[test]
@@ -59,10 +63,7 @@ fn empty_block_comment() {
     // This is legal. It should not do either of the following:
     // - Error with "still skipping comments at end of file"
     // - Yield a DocComment { text: "", .. }
-    assert_eq!(
-        lex(r#"/**/"#),
-        vec![Punct(Newline)]
-    )
+    assert_eq!(lex(r#"/**/"#), vec![Punct(Newline)])
 }
 
 #[test]
@@ -79,7 +80,9 @@ fn raw_strings() {
 @{content{
 "#);
     for each in stuff.iter() {
-        if each == &Punct(Newline) { continue }
+        if each == &Punct(Newline) {
+            continue;
+        }
         assert_eq!(each, &desired);
     }
 }

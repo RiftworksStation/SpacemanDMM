@@ -2,18 +2,20 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::mem::size_of;
+use std::ops::Range;
 
 use get_size::GetSize;
 use get_size_derive::GetSize;
 
-use indexmap::IndexMap;
 use foldhash::fast::RandomState;
+use indexmap::IndexMap;
 
 use crate::heap_size_of_index_map;
 
 use super::ast::{
-    ProcReturnType, Block, Expression, Ident, Parameter, PathOp, ProcDeclBuilder, ProcDeclKind, ProcFlags,
-    VarSuffix, VarType, VarTypeBuilder,
+    Block, Expression, Ident, Parameter, PathOp, ProcDeclBuilder, ProcDeclKind, ProcFlags,
+    ProcReturnType, VarSuffix, VarType, VarTypeBuilder,
 };
 use super::constants::Constant;
 use super::docs::DocCollection;
@@ -91,12 +93,18 @@ pub struct ProcDeclaration {
     pub id: SymbolId,
 }
 
+fn heap_size_of_location_range(_range: &Option<Range<Location>>) -> usize {
+    size_of::<Range<Location>>()
+}
+
 #[derive(Debug, Clone, GetSize)]
 pub struct ProcValue {
     pub location: Location,
     pub parameters: Box<[Parameter]>,
     pub docs: DocCollection,
     pub code: Option<Block>,
+    #[get_size(size_fn = heap_size_of_location_range)]
+    pub body_range: Option<Range<Location>>,
 }
 
 #[derive(Debug, Clone, Default, GetSize)]
@@ -173,12 +181,16 @@ impl Type {
     /// Checks whether this type's path is a subpath of the given path.
     #[inline]
     pub fn is_subpath_of(&self, parent: &str) -> bool {
-        subpath(&self.path, parent)
+        ispath(&self.path, parent)
     }
 
     // Used in the constant evaluator which holds an &mut ObjectTree and thus
     // can't be used with TypeRef.
-    pub(crate) fn get_value<'a>(&'a self, name: &str, objtree: &'a ObjectTree) -> Option<&'a VarValue> {
+    pub(crate) fn get_value<'a>(
+        &'a self,
+        name: &str,
+        objtree: &'a ObjectTree,
+    ) -> Option<&'a VarValue> {
         let mut current = Some(self);
         while let Some(ty) = current {
             if let Some(var) = ty.vars.get(name) {
@@ -189,7 +201,11 @@ impl Type {
         None
     }
 
-    pub(crate) fn get_var_declaration<'a>(&'a self, name: &str, objtree: &'a ObjectTree) -> Option<&'a VarDeclaration> {
+    pub(crate) fn get_var_declaration<'a>(
+        &'a self,
+        name: &str,
+        objtree: &'a ObjectTree,
+    ) -> Option<&'a VarDeclaration> {
         let mut current = Some(self);
         while let Some(ty) = current {
             if let Some(var) = ty.vars.get(name) {
@@ -204,9 +220,13 @@ impl Type {
 }
 
 #[inline]
-pub fn subpath(path: &str, parent: &str) -> bool {
-    debug_assert!(path.starts_with('/') && parent.starts_with('/') && parent.ends_with('/'));
-    path == &parent[..parent.len() - 1] || path.starts_with(parent)
+pub fn ispath(path: &str, parent: &str) -> bool {
+    debug_assert!(path.starts_with('/') && parent.starts_with('/'));
+    let parent = parent.trim_end_matches('/');
+    match path.strip_prefix(parent) {
+        Some(rest) => rest.is_empty() || rest.starts_with('/'),
+        None => false,
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -249,7 +269,10 @@ impl<'a> TypeRef<'a> {
     /// Find the parent **type** based on `parent_type` var, or parent path if unspecified.
     pub fn parent_type(&self) -> Option<TypeRef<'a>> {
         let idx = self.parent_type;
-        self.tree.graph.get(idx.index()).map(|_| TypeRef::new(self.tree, idx))
+        self.tree
+            .graph
+            .get(idx.index())
+            .map(|_| TypeRef::new(self.tree, idx))
     }
 
     /// Find the parent type of this without returning root.
@@ -258,17 +281,24 @@ impl<'a> TypeRef<'a> {
         if idx == NodeIndex::new(0) {
             return None;
         }
-        self.tree.graph.get(idx.index()).map(|_| TypeRef::new(self.tree, idx))
+        self.tree
+            .graph
+            .get(idx.index())
+            .map(|_| TypeRef::new(self.tree, idx))
     }
 
     /// Find a child **path** with the given name, if it exists.
     pub fn child(&self, name: &str) -> Option<TypeRef<'a>> {
-        self.children.get(name).map(|&idx| TypeRef::new(self.tree, idx))
+        self.children
+            .get(name)
+            .map(|&idx| TypeRef::new(self.tree, idx))
     }
 
     /// Iterate over all child **paths**.
-    pub fn children<'b>(&'b self) -> impl Iterator<Item=TypeRef<'a>> + 'b {
-        self.children.values().map(move |&idx| TypeRef::new(self.tree, idx))
+    pub fn children<'b>(&'b self) -> impl Iterator<Item = TypeRef<'a>> + 'b {
+        self.children
+            .values()
+            .map(move |&idx| TypeRef::new(self.tree, idx))
     }
 
     /// Recursively visit this and all child **paths**.
@@ -288,7 +318,7 @@ impl<'a> TypeRef<'a> {
         }
     }
 
-    pub fn iter_parent_types(&self) -> impl Iterator<Item=TypeRef<'a>> {
+    pub fn iter_parent_types(&self) -> impl Iterator<Item = TypeRef<'a>> {
         struct ParentTypeIter<'a>(Option<TypeRef<'a>>);
         impl<'a> Iterator for ParentTypeIter<'a> {
             type Item = TypeRef<'a>;
@@ -336,7 +366,8 @@ impl<'a> TypeRef<'a> {
                     return Some(child);
                 }
                 for &idx in self.children.values() {
-                    if let Some(child) = TypeRef::new(self.tree, idx).navigate(PathOp::Colon, name) {
+                    if let Some(child) = TypeRef::new(self.tree, idx).navigate(PathOp::Colon, name)
+                    {
                         // Yes, simply returning the first thing that matches
                         // is the correct behavior.
                         return Some(child);
@@ -348,7 +379,10 @@ impl<'a> TypeRef<'a> {
     }
 
     /// Find another type relative to this type.
-    pub fn navigate_path<S: AsRef<str>>(self, pieces: &[(PathOp, S)]) -> Option<NavigatePathResult<'a>> {
+    pub fn navigate_path<S: AsRef<str>>(
+        self,
+        pieces: &[(PathOp, S)],
+    ) -> Option<NavigatePathResult<'a>> {
         let mut next = Some(self);
         if let Some(&(PathOp::Slash, _)) = pieces.first() {
             next = Some(self.tree.root());
@@ -437,7 +471,7 @@ impl<'a> TypeRef<'a> {
         None
     }
 
-    pub fn iter_self_procs(self) -> impl Iterator<Item=ProcRef<'a>> {
+    pub fn iter_self_procs(self) -> impl Iterator<Item = ProcRef<'a>> {
         self.get().procs.iter().flat_map(move |(name, type_proc)| {
             let list = &type_proc.value;
             (0..list.len()).map(move |idx| ProcRef {
@@ -500,14 +534,20 @@ impl<'o> NavigatePathResult<'o> {
     }
 
     pub fn to_path(self) -> Vec<Ident> {
-        let mut path: Vec<Ident> = self.ty().path.split('/').skip(1).map(ToOwned::to_owned).collect();
+        let mut path: Vec<Ident> = self
+            .ty()
+            .path
+            .split('/')
+            .skip(1)
+            .map(ToOwned::to_owned)
+            .collect();
         match self {
             NavigatePathResult::Type(_) => {},
             NavigatePathResult::ProcGroup(_, kind) => path.push(kind.to_string()),
             NavigatePathResult::ProcPath(proc, kind) => {
                 path.push(kind.to_string());
                 path.push(proc.name().to_owned());
-            }
+            },
         }
         path
     }
@@ -604,7 +644,14 @@ impl<'a> std::ops::Deref for ProcRef<'a> {
 
 impl<'a> fmt::Debug for ProcRef<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}/proc/{}[{}/{}]", self.ty, self.name, self.idx, self.list.len())
+        write!(
+            f,
+            "{:?}/proc/{}[{}/{}]",
+            self.ty,
+            self.name,
+            self.idx,
+            self.list.len()
+        )
     }
 }
 
@@ -653,29 +700,29 @@ impl ObjectTree {
     // ------------------------------------------------------------------------
     // Access
 
-    pub fn node_indices(&self) -> impl Iterator<Item=NodeIndex> {
+    pub fn node_indices(&self) -> impl Iterator<Item = NodeIndex> {
         (0..self.graph.len()).map(NodeIndex::new)
     }
 
-    pub fn iter_types(&self) -> impl Iterator<Item=TypeRef<'_>> + '_ {
+    pub fn iter_types(&self) -> impl Iterator<Item = TypeRef<'_>> + '_ {
         self.node_indices().map(move |idx| TypeRef::new(self, idx))
     }
 
-    pub fn root(&self) -> TypeRef {
+    pub fn root(&self) -> TypeRef<'_> {
         TypeRef::new(self, NodeIndex::new(0))
     }
 
-    pub fn find(&self, path: &str) -> Option<TypeRef> {
+    pub fn find(&self, path: &str) -> Option<TypeRef<'_>> {
         if path.is_empty() {
             return Some(self.root());
         }
         self.types.get(path).map(|&ix| TypeRef::new(self, ix))
     }
 
-    pub fn expect(&self, path: &str) -> TypeRef {
+    pub fn expect(&self, path: &str) -> TypeRef<'_> {
         match self.types.get(path) {
             Some(&ix) => TypeRef::new(self, ix),
-            None => panic!("type not found: {:?}", path),
+            None => panic!("type not found: {path:?}"),
         }
     }
 
@@ -683,7 +730,7 @@ impl ObjectTree {
         self.graph.get(type_.parent_type.index())
     }
 
-    pub fn type_by_path<I>(&self, path: I) -> Option<TypeRef>
+    pub fn type_by_path<I>(&self, path: I) -> Option<TypeRef<'_>>
     where
         I: IntoIterator,
         I::Item: AsRef<str>,
@@ -696,7 +743,7 @@ impl ObjectTree {
         }
     }
 
-    pub fn type_by_path_approx<I>(&self, path: I) -> (bool, TypeRef)
+    pub fn type_by_path_approx<I>(&self, path: I) -> (bool, TypeRef<'_>)
     where
         I: IntoIterator,
         I::Item: AsRef<str>,
@@ -720,7 +767,7 @@ impl ObjectTree {
         (true, TypeRef::new(self, current))
     }
 
-    pub fn type_by_constant(&self, constant: &Constant) -> Option<TypeRef> {
+    pub fn type_by_constant(&self, constant: &Constant) -> Option<TypeRef<'_>> {
         match constant {
             Constant::String(string_path) => self.find(string_path),
             Constant::Prefab(pop) => self.type_by_path(pop.path.iter()),
@@ -750,7 +797,9 @@ impl std::ops::Index<NodeIndex> for ObjectTree {
 
 impl std::ops::IndexMut<NodeIndex> for ObjectTree {
     fn index_mut(&mut self, ix: NodeIndex) -> &mut Type {
-        self.graph.get_mut(ix.index()).expect("node index out of range")
+        self.graph
+            .get_mut(ix.index())
+            .expect("node index out of range")
     }
 }
 
@@ -825,7 +874,15 @@ impl ObjectTreeBuilder {
     fn assign_parent_types(&mut self, context: &Context) {
         for (path, &type_idx) in self.inner.types.iter() {
             let mut location = self.inner[type_idx].location;
-            let idx = if path == "/datum" || path == "/list" || path == "/savefile" || path == "/world" {
+            let idx = if path == "/datum"
+                || path == "/list"
+                || path == "/alist"
+                || path == "/savefile"
+                || path == "/world"
+                || path == "/vector"
+                || path == "/pixloc"
+                || path == "/callee"
+            {
                 // These types have no parent and cannot have one added. In the official compiler:
                 // - setting list or savefile/parent_type is denied with the same error as setting something's parent type to them;
                 // - setting datum/parent_type infinite loops the compiler;
@@ -837,7 +894,7 @@ impl ObjectTreeBuilder {
                     if var.value.expression.is_some() {
                         context.register_error(DMError::new(
                             var.value.location,
-                            format!("not allowed to change {}/parent_type", path),
+                            format!("not allowed to change {path}/parent_type"),
                         ));
                     }
                 }
@@ -871,7 +928,7 @@ impl ObjectTreeBuilder {
                                 Ok(constant) => {
                                     constant_buf = constant;
                                     Ok(&constant_buf)
-                                }
+                                },
                                 Err(e) => Err(e),
                             }
                         } else if path == "/client" {
@@ -879,13 +936,16 @@ impl ObjectTreeBuilder {
                             Ok(&empty_string)
                         } else {
                             // A weird situation which should not happen.
-                            Err(DMError::new(location, format!("missing {}/parent_type", path)))
+                            Err(DMError::new(
+                                location,
+                                format!("missing {path}/parent_type"),
+                            ))
                         };
 
                         match constant {
                             Ok(Constant::String(s)) => {
                                 parent_type = s;
-                            }
+                            },
                             Ok(Constant::Prefab(ref pop)) if pop.vars.is_empty() => {
                                 parent_type_buf = String::new();
                                 for piece in pop.path.iter() {
@@ -893,13 +953,13 @@ impl ObjectTreeBuilder {
                                     parent_type_buf.push_str(piece);
                                 }
                                 parent_type = &parent_type_buf;
-                            }
+                            },
                             Ok(other) => {
-                                context.register_error(DMError::new(location, format!("value of {}/parent_type must be a string or typepath, got {}", path, other)));
-                            }
+                                context.register_error(DMError::new(location, format!("value of {path}/parent_type must be a string or typepath, got {other}")));
+                            },
                             Err(e) => {
                                 context.register_error(e);
-                            }
+                            },
                         }
                     }
                     parent_type
@@ -913,9 +973,9 @@ impl ObjectTreeBuilder {
                 } else {
                     context.register_error(DMError::new(
                         location,
-                        format!("bad parent type for {}: {}", path, parent_type),
+                        format!("bad parent type for {path}: {parent_type}"),
                     ));
-                    NodeIndex::new(0)  // on bad parent_type, fall back to the root
+                    NodeIndex::new(0) // on bad parent_type, fall back to the root
                 }
             };
 
@@ -926,7 +986,13 @@ impl ObjectTreeBuilder {
     // ------------------------------------------------------------------------
     // Parsing
 
-    pub(crate) fn subtype_or_add(&mut self, location: Location, parent: NodeIndex, child: &str, len: usize) -> NodeIndex {
+    pub(crate) fn subtype_or_add(
+        &mut self,
+        location: Location,
+        parent: NodeIndex,
+        child: &str,
+        len: usize,
+    ) -> NodeIndex {
         if let Some(&target) = self.inner[parent].children.get(child) {
             let node = &mut self.inner[target];
             if node.location_specificity > len {
@@ -966,9 +1032,7 @@ impl ObjectTreeBuilder {
     ) -> &mut TypeVar {
         // TODO: warn and merge docs for repeats
         match self.inner[ty].vars.entry(name.to_owned()) {
-            indexmap::map::Entry::Vacant(slot) => {
-                slot.insert(TypeVar { value, declaration })
-            },
+            indexmap::map::Entry::Vacant(slot) => slot.insert(TypeVar { value, declaration }),
             indexmap::map::Entry::Occupied(slot) => {
                 let type_var = slot.into_mut();
                 if let Some(declaration) = declaration {
@@ -990,17 +1054,22 @@ impl ObjectTreeBuilder {
         expression: Option<Expression>,
     ) -> &mut TypeVar {
         let id = self.symbols.allocate();
-        self.insert_var(ty, name, VarValue {
-            location,
-            expression,
-            docs,
-            constant: None,
-            being_evaluated: false,
-        }, Some(VarDeclaration {
-            var_type,
-            location,
-            id,
-        }))
+        self.insert_var(
+            ty,
+            name,
+            VarValue {
+                location,
+                expression,
+                docs,
+                constant: None,
+                being_evaluated: false,
+            },
+            Some(VarDeclaration {
+                var_type,
+                location,
+                id,
+            }),
+        )
     }
 
     pub(crate) fn override_var(
@@ -1011,16 +1080,21 @@ impl ObjectTreeBuilder {
         docs: DocCollection,
         expression: Expression,
     ) -> &mut TypeVar {
-        self.insert_var(ty, name, VarValue {
-            location,
-            expression: Some(expression),
-            docs,
-            constant: None,
-            being_evaluated: false,
-        }, None)
+        self.insert_var(
+            ty,
+            name,
+            VarValue {
+                location,
+                expression: Some(expression),
+                docs,
+                constant: None,
+                being_evaluated: false,
+            },
+            None,
+        )
     }
 
-    fn get_from_path<'a, I: Iterator<Item=&'a str>>(
+    fn get_from_path<'a, I: Iterator<Item = &'a str>>(
         &mut self,
         location: Location,
         mut path: I,
@@ -1055,7 +1129,7 @@ impl ObjectTreeBuilder {
         suffix: VarSuffix,
     ) -> Result<Option<&mut TypeVar>, DMError>
     where
-        I: Iterator<Item=&'a str>,
+        I: Iterator<Item = &'a str>,
     {
         use super::ast::VarTypeFlags;
         let mut is_declaration = false;
@@ -1094,24 +1168,26 @@ impl ObjectTreeBuilder {
         let symbols = &mut self.symbols;
         let node = &mut self.inner.graph[parent.index()];
         // TODO: warn and merge docs for repeats
-        Ok(Some(node.vars.entry(prev.to_owned()).or_insert_with(|| TypeVar {
-            value: VarValue {
-                location,
-                expression: suffix.into_initializer(),
-                constant: None,
-                being_evaluated: false,
-                docs: comment,
-            },
-            declaration: if is_declaration {
-                Some(VarDeclaration {
-                    var_type: var_type.build(),
+        Ok(Some(node.vars.entry(prev.to_owned()).or_insert_with(
+            || TypeVar {
+                value: VarValue {
                     location,
-                    id: symbols.allocate(),
-                })
-            } else {
-                None
+                    expression: suffix.into_initializer(),
+                    constant: None,
+                    being_evaluated: false,
+                    docs: comment,
+                },
+                declaration: if is_declaration {
+                    Some(VarDeclaration {
+                        var_type: var_type.build(),
+                        location,
+                        id: symbols.allocate(),
+                    })
+                } else {
+                    None
+                },
             },
-        })))
+        )))
     }
 
     // It's fine.
@@ -1126,17 +1202,24 @@ impl ObjectTreeBuilder {
         parameters: Vec<Parameter>,
         return_type: ProcReturnType,
         code: Option<Block>,
+        body_range: Option<Range<Location>>,
     ) -> Result<(usize, &mut ProcValue), DMError> {
         let node = &mut self.inner.graph[parent.index()];
-        let proc = node.procs.entry(name.to_owned()).or_insert_with(|| TypeProc {
-            value: Vec::with_capacity(1),
-            declaration: None,
-        });
+        let proc = node
+            .procs
+            .entry(name.to_owned())
+            .or_insert_with(|| TypeProc {
+                value: Vec::with_capacity(1),
+                declaration: None,
+            });
         if let Some(decl_builder) = declaration {
             if let Some(ref decl) = proc.declaration {
-                DMError::new(location, format!("duplicate definition of {}/{}", decl_builder.kind, name))
-                    .with_note(decl.location, "previous definition")
-                    .register(context);
+                DMError::new(
+                    location,
+                    format!("duplicate definition of {}/{}", decl_builder.kind, name),
+                )
+                .with_note(decl.location, "previous definition")
+                .register(context);
             } else {
                 proc.declaration = Some(ProcDeclaration {
                     location,
@@ -1152,7 +1235,8 @@ impl ObjectTreeBuilder {
             location,
             parameters: parameters.into(),
             docs: Default::default(),
-            code
+            code,
+            body_range,
         };
 
         // DM really does reorder the declaration to appear before the override,
@@ -1167,31 +1251,35 @@ impl ObjectTreeBuilder {
                 // Show the hint now, make up for it by putting the original
                 // at the beginning of the list (so `..()` finds it).
                 // Configuration can be used to upgrade this above a hint.
-                DMError::new(proc.value[0].location, format!("override of {}/{} precedes definition", node.path, name))
-                    .set_severity(Severity::Hint)
-                    .with_errortype("override_precedes_definition")
-                    .with_note(location, format!("{}/{}/{} is defined here", node.path, decl, name))
-                    .register(context);
+                DMError::new(
+                    proc.value[0].location,
+                    format!("override of {}/{} precedes definition", node.path, name),
+                )
+                .set_severity(Severity::Hint)
+                .with_errortype("override_precedes_definition")
+                .with_note(
+                    location,
+                    format!("{}/{}/{} is defined here", node.path, decl, name),
+                )
+                .register(context);
                 proc.value.insert(0, value);
                 Ok((len, proc.value.first_mut().unwrap()))
             },
             _ => {
                 proc.value.push(value);
                 Ok((len, proc.value.last_mut().unwrap()))
-            }
+            },
         }
     }
 
-    pub(crate) fn add_builtin_type(
-        &mut self,
-        elems: &[&'static str],
-    ) -> &mut Type {
+    pub(crate) fn add_builtin_type(&mut self, elems: &[&'static str]) -> &mut Type {
         self.add_type(
             Location::builtins(),
             elems.iter().cloned(),
             elems.len() + 1,
             Default::default(),
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     // an entry which may be anything depending on the path
@@ -1219,7 +1307,17 @@ impl ObjectTreeBuilder {
         let len = elems.len() + 1;
 
         let (parent, initial) = self.get_from_path(location, &mut path, len).unwrap();
-        if let Some(type_var) = self.register_var(location, parent, initial, path, Default::default(), Default::default()).unwrap() {
+        if let Some(type_var) = self
+            .register_var(
+                location,
+                parent,
+                initial,
+                path,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap()
+        {
             type_var.value.location = location;
             type_var.value.constant = value;
             &mut type_var.value
@@ -1238,12 +1336,23 @@ impl ObjectTreeBuilder {
             Location::builtins(),
             elems.iter().copied(),
             elems.len() + 1,
-            params.iter().copied().map(|param| Parameter { name: param.into(), .. Default::default() }).collect(),
+            params
+                .iter()
+                .copied()
+                .map(|param| Parameter {
+                    name: param.into(),
+                    ..Default::default()
+                })
+                .collect(),
             None,
-        ).unwrap().1
+            None,
+        )
+        .unwrap()
+        .1
     }
 
     // an entry which is definitely a proc because an argument list is specified
+    #[allow(clippy::too_many_arguments)]
     fn add_proc<'a, I: Iterator<Item = &'a str>>(
         &mut self,
         context: &Context,
@@ -1252,6 +1361,7 @@ impl ObjectTreeBuilder {
         len: usize,
         parameters: Vec<Parameter>,
         code: Option<Block>,
+        body_range: Option<Range<Location>>,
     ) -> Result<(usize, &mut ProcValue), DMError> {
         let (parent, mut proc_name) = self.get_from_path(location, &mut path, len)?;
         let mut declaration = None;
@@ -1273,11 +1383,21 @@ impl ObjectTreeBuilder {
         if let Some(other) = path.next() {
             return Err(DMError::new(
                 location,
-                format!("proc name must be a single identifier (spurious {:?})", other),
+                format!("proc name must be a single identifier (spurious {other:?})"),
             ));
         }
 
-        self.register_proc(context, location, parent, proc_name, declaration, parameters, ProcReturnType::default(), code)
+        self.register_proc(
+            context,
+            location,
+            parent,
+            proc_name,
+            declaration,
+            parameters,
+            ProcReturnType::default(),
+            code,
+            body_range,
+        )
     }
 }
 

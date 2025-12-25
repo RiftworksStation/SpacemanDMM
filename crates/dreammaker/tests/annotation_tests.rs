@@ -19,7 +19,8 @@ fn annotation_basic() {
 
     proc/Init()
         world.log << new/obj()
-"#.trim();
+"#
+    .trim();
 
     let context = Default::default();
     let lexer = Lexer::new(&context, Default::default(), code.as_bytes());
@@ -33,7 +34,7 @@ fn annotation_basic() {
         line: 9,
         column: 14,
     }) {
-        println!("{:?}", each);
+        println!("{each:?}");
         for each in annotations.get_range_raw(each.0) {
             println!("    {:?}", each.1);
         }

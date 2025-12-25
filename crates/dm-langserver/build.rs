@@ -12,8 +12,8 @@ fn main() {
     let mut f = File::create(out_dir.join("build-info.txt")).unwrap();
 
     match read_commit() {
-        Ok(commit) => writeln!(f, "commit: {}", commit).unwrap(),
-        Err(err) => println!("cargo:warning=Failed to fetch commit info: {}", err)
+        Ok(commit) => writeln!(f, "commit: {commit}").unwrap(),
+        Err(err) => println!("cargo:warning=Failed to fetch commit info: {err}"),
     }
     writeln!(f, "build date: {}", chrono::Utc::now().date_naive()).unwrap();
 
@@ -32,9 +32,9 @@ fn main() {
     download_dll(
         &out_dir,
         "debug_server.dll",
-        "v2.3.4", // DEBUG_SERVER_TAG
-        "https://github.com/willox/auxtools/releases/download/v2.3.4/debug_server.dll", // DEBUG_SERVER_DLL_URL
-        "06547804cf39c74d6a74aa1663a47f438871ea8fa85deb7dcb0c8d772747db7c", // DEBUG_SERVER_DLL_SHA256
+        "v2.3.5", // DEBUG_SERVER_TAG
+        "https://github.com/willox/auxtools/releases/download/v2.3.5/debug_server.dll", // DEBUG_SERVER_DLL_URL
+        "dfcaa1086608047559103b55396f99504320f2b0ec1695baa3dc34dbd41695b2", // DEBUG_SERVER_DLL_SHA256
     );
 }
 
@@ -43,7 +43,10 @@ fn read_commit() -> Result<String, git2::Error> {
     let head = repo.head()?.peel_to_commit()?.id();
 
     let mut all_tags = Vec::new();
-    repo.tag_foreach(|oid, _| { all_tags.push(oid); true })?;
+    repo.tag_foreach(|oid, _| {
+        all_tags.push(oid);
+        true
+    })?;
 
     let mut best = None;
     for tag_id in all_tags {
@@ -54,7 +57,7 @@ fn read_commit() -> Result<String, git2::Error> {
                 match best {
                     None => best = Some(ahead),
                     Some(prev) if ahead < prev => best = Some(ahead),
-                    _ => {}
+                    _ => {},
                 }
             }
             if ahead == 0 {
@@ -64,8 +67,12 @@ fn read_commit() -> Result<String, git2::Error> {
     }
 
     match best {
-        None | Some(0) => {}
-        Some(ahead) => println!("cargo:rustc-env=CARGO_PKG_VERSION={}+{}", std::env::var("CARGO_PKG_VERSION").unwrap(), ahead),
+        None | Some(0) => {},
+        Some(ahead) => println!(
+            "cargo:rustc-env=CARGO_PKG_VERSION={}+{}",
+            std::env::var("CARGO_PKG_VERSION").unwrap(),
+            ahead
+        ),
     }
 
     Ok(head.to_string())
@@ -73,8 +80,12 @@ fn read_commit() -> Result<String, git2::Error> {
 
 fn download_dll(out_dir: &Path, fname: &str, tag: &str, url: &str, sha256: &str) {
     let full_path = out_dir.join(fname);
-    println!("cargo:rustc-env=BUNDLE_PATH_{}={}", fname, full_path.display());
-    println!("cargo:rustc-env=BUNDLE_VERSION_{}={}", fname, tag);
+    println!(
+        "cargo:rustc-env=BUNDLE_PATH_{}={}",
+        fname,
+        full_path.display()
+    );
+    println!("cargo:rustc-env=BUNDLE_VERSION_{fname}={tag}");
 
     if let Ok(digest) = sha256::try_digest(&full_path) {
         if digest == sha256 {
@@ -83,7 +94,13 @@ fn download_dll(out_dir: &Path, fname: &str, tag: &str, url: &str, sha256: &str)
     }
 
     std::io::copy(
-        &mut ureq::get(url).call().expect("Error downloading DLL to bundle").into_reader(),
-        &mut std::fs::File::create(full_path).unwrap(),
-    ).unwrap();
+        &mut ureq::get(url)
+            .call()
+            .expect("Error downloading DLL to bundle")
+            .into_reader(),
+        &mut std::fs::File::create(&full_path).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(sha256, sha256::try_digest(&full_path).unwrap());
 }

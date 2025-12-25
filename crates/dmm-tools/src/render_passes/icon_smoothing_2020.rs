@@ -23,10 +23,12 @@ const NORTHWEST_JUNCTION: i32 = 1 << 7;
 
 /// Smoothing system in where adjacencies are calculated and used to select a pre-baked icon_state, encoded by bitmasking.
 const SMOOTH_BITMASK: i32 = 1 << 0;
+/// Older smoothing system.
+const SMOOTH_CORNERS: i32 = 1 << 1; // NOTE: This constant was missing in the conflict but required by the logic.
 /// Atom has diagonal corners, with underlays under them.
-const SMOOTH_DIAGONAL_CORNERS: i32 = 1 << 1;
+const SMOOTH_DIAGONAL_CORNERS: i32 = 1 << 2;
 /// Atom will smooth with the borders of the map.
-const SMOOTH_BORDER: i32 = 1 << 2;
+const SMOOTH_BORDER: i32 = 1 << 3;
 
 pub struct IconSmoothing {
     pub mask: i32,
@@ -39,7 +41,8 @@ impl Default for IconSmoothing {
 }
 
 impl RenderPass for IconSmoothing {
-    fn adjust_sprite<'a>(&self,
+    fn adjust_sprite<'a>(
+        &self,
         atom: &Atom<'a>,
         sprite: &mut Sprite<'a>,
         _objtree: &'a ObjectTree,
@@ -51,17 +54,38 @@ impl RenderPass for IconSmoothing {
         }
     }
 
-    fn neighborhood_appearance<'a>(&self,
+    fn neighborhood_appearance<'a>(
+        &self,
         atom: &Atom<'a>,
         objtree: &'a ObjectTree,
         neighborhood: &Neighborhood<'a, '_>,
         output: &mut Vec<Sprite<'a>>,
         bump: &'a bumpalo::Bump,
     ) -> bool {
-        let smooth_flags = self.mask & atom.get_var("smoothing_flags", objtree).to_int().unwrap_or(0);
-        if smooth_flags & SMOOTH_BITMASK != 0 {
+        let smooth_flags = self.mask
+            & atom
+                .get_var("smoothing_flags", objtree)
+                .to_int()
+                .unwrap_or(0);
+        if smooth_flags & SMOOTH_CORNERS != 0 {
             let adjacencies = calculate_adjacencies(objtree, neighborhood, atom, smooth_flags);
-            bitmask_smooth(output, objtree, bump, neighborhood, atom, adjacencies, smooth_flags)
+            if smooth_flags & SMOOTH_DIAGONAL_CORNERS != 0 {
+                diagonal_smooth(output, objtree, bump, neighborhood, atom, adjacencies);
+            } else {
+                cardinal_smooth(output, objtree, bump, atom, adjacencies);
+            }
+            false
+        } else if smooth_flags & SMOOTH_BITMASK != 0 {
+            let adjacencies = calculate_adjacencies(objtree, neighborhood, atom, smooth_flags);
+            bitmask_smooth(
+                output,
+                objtree,
+                bump,
+                neighborhood,
+                atom,
+                adjacencies,
+                smooth_flags,
+            )
         } else {
             true
         }
@@ -71,11 +95,18 @@ impl RenderPass for IconSmoothing {
 // ----------------------------------------------------------------------------
 // Older cardinal smoothing system
 
-fn calculate_adjacencies(objtree: &ObjectTree, neighborhood: &Neighborhood, atom: &Atom, smooth_flags: i32) -> i32 {
+fn calculate_adjacencies(
+    objtree: &ObjectTree,
+    neighborhood: &Neighborhood,
+    atom: &Atom,
+    smooth_flags: i32,
+) -> i32 {
     // Easier to read as a nested conditional
     #[allow(clippy::collapsible_if)]
     if atom.istype("/atom/movable/") {
-        if atom.get_var("can_be_unanchored", objtree).to_bool() && !atom.get_var("anchored", objtree).to_bool() {
+        if atom.get_var("can_be_unanchored", objtree).to_bool()
+            && !atom.get_var("anchored", objtree).to_bool()
+        {
             return 0;
         }
     }
@@ -114,7 +145,13 @@ fn calculate_adjacencies(objtree: &ObjectTree, neighborhood: &Neighborhood, atom
     adjacencies
 }
 
-fn find_type_in_direction(objtree: &ObjectTree, adjacency: &Neighborhood, source: &Atom, direction: Dir, smooth_flags: i32) -> bool {
+fn find_type_in_direction(
+    objtree: &ObjectTree,
+    adjacency: &Neighborhood,
+    source: &Atom,
+    direction: Dir,
+    smooth_flags: i32,
+) -> bool {
     let atom_list = adjacency.offset(direction);
     if atom_list.is_empty() {
         return smooth_flags & SMOOTH_BORDER != 0;
@@ -145,14 +182,135 @@ fn find_type_in_direction(objtree: &ObjectTree, adjacency: &Neighborhood, source
     false
 }
 
-fn diagonal_underlay<'a>(output: &mut Vec<Sprite<'a>>, objtree: &'a ObjectTree, neighborhood: &Neighborhood<'a, '_>, source: &Atom<'a>, adjacencies: i32) {
+fn cardinal_smooth<'a>(
+    output: &mut Vec<Sprite<'a>>,
+    objtree: &'a ObjectTree,
+    bump: &'a bumpalo::Bump,
+    source: &Atom<'a>,
+    adjacencies: i32,
+) {
+    for &(what, f1, n1, f2, n2, f3) in &[
+        (
+            "1",
+            NORTH_JUNCTION,
+            "n",
+            WEST_JUNCTION,
+            "w",
+            NORTHWEST_JUNCTION,
+        ),
+        (
+            "2",
+            NORTH_JUNCTION,
+            "n",
+            EAST_JUNCTION,
+            "e",
+            NORTHEAST_JUNCTION,
+        ),
+        (
+            "3",
+            SOUTH_JUNCTION,
+            "s",
+            WEST_JUNCTION,
+            "w",
+            SOUTHWEST_JUNCTION,
+        ),
+        (
+            "4",
+            SOUTH_JUNCTION,
+            "s",
+            EAST_JUNCTION,
+            "e",
+            SOUTHEAST_JUNCTION,
+        ),
+    ] {
+        let name = if (adjacencies & f1 != 0) && (adjacencies & f2 != 0) {
+            if (adjacencies & f3) != 0 {
+                bumpalo::format!(in bump, "{}-f", what)
+            } else {
+                bumpalo::format!(in bump, "{}-{}{}", what, n1, n2)
+            }
+        } else if adjacencies & f1 != 0 {
+            bumpalo::format!(in bump, "{}-{}", what, n1)
+        } else if adjacencies & f2 != 0 {
+            bumpalo::format!(in bump, "{}-{}", what, n2)
+        } else {
+            bumpalo::format!(in bump, "{}-i", what)
+        };
+
+        let mut sprite = Sprite {
+            icon_state: name.into_bump_str(),
+            ..source.sprite
+        };
+        if let Some(icon) = source.get_var("smooth_icon", objtree).as_path_str() {
+            sprite.icon = icon;
+        }
+        output.push(sprite);
+    }
+}
+
+fn diagonal_smooth<'a>(
+    output: &mut Vec<Sprite<'a>>,
+    objtree: &'a ObjectTree,
+    bump: &'a bumpalo::Bump,
+    neighborhood: &Neighborhood<'a, '_>,
+    source: &Atom<'a>,
+    adjacencies: i32,
+) {
+    let presets = if adjacencies == NORTH_JUNCTION | WEST_JUNCTION {
+        ["d-se", "d-se-0"]
+    } else if adjacencies == NORTH_JUNCTION | EAST_JUNCTION {
+        ["d-sw", "d-sw-0"]
+    } else if adjacencies == SOUTH_JUNCTION | WEST_JUNCTION {
+        ["d-ne", "d-ne-0"]
+    } else if adjacencies == SOUTH_JUNCTION | EAST_JUNCTION {
+        ["d-nw", "d-nw-0"]
+    } else if adjacencies == NORTH_JUNCTION | WEST_JUNCTION | NORTHWEST_JUNCTION {
+        ["d-se", "d-se-1"]
+    } else if adjacencies == NORTH_JUNCTION | EAST_JUNCTION | NORTHEAST_JUNCTION {
+        ["d-sw", "d-sw-1"]
+    } else if adjacencies == SOUTH_JUNCTION | WEST_JUNCTION | SOUTHWEST_JUNCTION {
+        ["d-ne", "d-ne-1"]
+    } else if adjacencies == SOUTH_JUNCTION | EAST_JUNCTION | SOUTHEAST_JUNCTION {
+        ["d-nw", "d-nw-1"]
+    } else {
+        return cardinal_smooth(output, objtree, bump, source, adjacencies);
+    };
+
+    // turf underneath
+    if source.istype("/turf/closed/wall/") {
+        diagonal_underlay(output, objtree, neighborhood, source, adjacencies);
+    }
+
+    // the diagonal overlay
+    for &each in presets.iter() {
+        let mut copy = Sprite {
+            icon_state: each,
+            ..source.sprite
+        };
+        if let Some(icon) = source.get_var("smooth_icon", objtree).as_path_str() {
+            copy.icon = icon;
+        }
+        output.push(copy);
+    }
+}
+
+fn diagonal_underlay<'a>(
+    output: &mut Vec<Sprite<'a>>,
+    objtree: &'a ObjectTree,
+    neighborhood: &Neighborhood<'a, '_>,
+    source: &Atom<'a>,
+    adjacencies: i32,
+) {
     // BYOND memes
     if source
         .get_var("fixed_underlay", objtree)
         .index(&Constant::string("space"))
         .is_some()
     {
-        output.push(Sprite::from_vars(objtree, &objtree.expect("/turf/open/space/basic")));
+        output.push(Sprite::from_vars(
+            objtree,
+            &objtree.expect("/turf/open/space/basic"),
+        ));
     } else if let Some(dir) = reverse_ndir(adjacencies) {
         let dir = dir.flip();
         let mut needs_plating = true;
@@ -168,7 +326,10 @@ fn diagonal_underlay<'a>(output: &mut Vec<Sprite<'a>>, objtree: &'a ObjectTree, 
             }
         }
         if needs_plating {
-            output.push(Sprite::from_vars(objtree, &objtree.expect("/turf/open/floor/plating")));
+            output.push(Sprite::from_vars(
+                objtree,
+                &objtree.expect("/turf/open/floor/plating"),
+            ));
         }
     }
 }
@@ -210,18 +371,27 @@ fn bitmask_smooth<'a>(
 ) -> bool {
     let mut diagonal = "";
     if source.istype("/turf/open/floor/") {
-        if source.get_var("broken", objtree).to_bool() || source.get_var("burnt", objtree).to_bool() {
-            return true;  // use original appearance
+        if source.get_var("broken", objtree).to_bool() || source.get_var("burnt", objtree).to_bool()
+        {
+            return true; // use original appearance
         }
-    } else if source.istype("/turf/closed/") && (smooth_flags & SMOOTH_DIAGONAL_CORNERS != 0) && reverse_ndir(smoothing_junction).is_some() {
+    } else if source.istype("/turf/closed/")
+        && (smooth_flags & SMOOTH_DIAGONAL_CORNERS != 0)
+        && reverse_ndir(smoothing_junction).is_some()
+    {
         diagonal_underlay(output, objtree, neighborhood, source, smoothing_junction);
         diagonal = "-d";
     }
 
-    let base_icon_state = source.get_var("base_icon_state", objtree).as_str().unwrap_or("");
+    let base_icon_state = source
+        .get_var("base_icon_state", objtree)
+        .as_str()
+        .unwrap_or("");
     let mut sprite = Sprite {
-        icon_state: bumpalo::format!(in bump, "{}-{}{}", base_icon_state, smoothing_junction, diagonal).into_bump_str(),
-        .. source.sprite
+        icon_state:
+            bumpalo::format!(in bump, "{}-{}{}", base_icon_state, smoothing_junction, diagonal)
+                .into_bump_str(),
+        ..source.sprite
     };
     if let Some(icon) = source.get_var("smooth_icon", objtree).as_path_str() {
         sprite.icon = icon;

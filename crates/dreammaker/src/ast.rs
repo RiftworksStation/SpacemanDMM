@@ -123,6 +123,7 @@ pub enum BinaryOp {
     Greater,
     LessEq,
     GreaterEq,
+    LessOrGreater,
     Equiv,
     NotEquiv,
     BitAnd,
@@ -133,7 +134,7 @@ pub enum BinaryOp {
     And,
     Or,
     In,
-    To,  // only appears in RHS of `In`
+    To, // only appears in RHS of `In`
 }
 
 impl fmt::Display for BinaryOp {
@@ -152,6 +153,7 @@ impl fmt::Display for BinaryOp {
             Less => "<",
             Greater => ">",
             LessEq => "<=",
+            LessOrGreater => "<=>",
             GreaterEq => ">=",
             Equiv => "~=",
             NotEquiv => "~!",
@@ -329,7 +331,10 @@ pub struct ProcDeclBuilder {
 
 impl ProcDeclBuilder {
     pub fn new(kind: ProcDeclKind, flags: Option<ProcFlags>) -> ProcDeclBuilder {
-        ProcDeclBuilder { kind, flags: flags.unwrap_or_default() }
+        ProcDeclBuilder {
+            kind,
+            flags: flags.unwrap_or_default(),
+        }
     }
 
     pub fn kind(self) -> &'static str {
@@ -413,14 +418,18 @@ impl ProcFlags {
 
     pub fn to_vec(&self) -> Vec<&'static str> {
         let mut v = Vec::new();
-        if self.is_final() { v.push("final"); }
+        if self.is_final() {
+            v.push("final");
+        }
         v
     }
 }
 
 impl fmt::Display for ProcFlags {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        if self.is_final() { fmt.write_str("/final")?; }
+        if self.is_final() {
+            fmt.write_str("/final")?;
+        }
         Ok(())
     }
 }
@@ -625,7 +634,8 @@ impl VarTypeFlags {
 
     #[inline]
     pub fn is_const_evaluable(&self) -> bool {
-        self.contains(VarTypeFlags::CONST) || !self.intersects(VarTypeFlags::STATIC | VarTypeFlags::PROTECTED)
+        self.contains(VarTypeFlags::CONST)
+            || !self.intersects(VarTypeFlags::STATIC | VarTypeFlags::PROTECTED)
     }
 
     #[inline]
@@ -635,12 +645,24 @@ impl VarTypeFlags {
 
     pub fn to_vec(&self) -> Vec<&'static str> {
         let mut v = Vec::new();
-        if self.is_static() { v.push("static"); }
-        if self.is_const() { v.push("const"); }
-        if self.is_tmp() { v.push("tmp"); }
-        if self.is_final() { v.push("final"); }
-        if self.is_private() { v.push("SpacemanDMM_private"); }
-        if self.is_protected() { v.push("SpacemanDMM_protected"); }
+        if self.is_static() {
+            v.push("static");
+        }
+        if self.is_const() {
+            v.push("const");
+        }
+        if self.is_tmp() {
+            v.push("tmp");
+        }
+        if self.is_final() {
+            v.push("final");
+        }
+        if self.is_private() {
+            v.push("SpacemanDMM_private");
+        }
+        if self.is_protected() {
+            v.push("SpacemanDMM_protected");
+        }
         v
     }
 }
@@ -734,7 +756,7 @@ impl fmt::Debug for Ident2 {
 
 impl GetSize for Ident2 {
     fn get_heap_size(&self) -> usize {
-        self.inner.as_bytes().len()
+        self.inner.len()
     }
 }
 
@@ -767,7 +789,7 @@ pub struct FormatTreePath<'a, T>(pub &'a [T]);
 impl<'a, T: fmt::Display> fmt::Display for FormatTreePath<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for each in self.0.iter() {
-            write!(f, "/{}", each)?;
+            write!(f, "/{each}")?;
         }
         Ok(())
     }
@@ -811,7 +833,7 @@ pub struct FormatVars<'a, T>(pub &'a T);
 
 impl<'a, T, K, V> fmt::Display for FormatVars<'a, T>
 where
-    &'a T: IntoIterator<Item=(K, V)>,
+    &'a T: IntoIterator<Item = (K, V)>,
     K: fmt::Display,
     V: fmt::Display,
 {
@@ -865,7 +887,7 @@ pub enum Expression {
         if_: Box<Expression>,
         /// The value otherwise.
         else_: Box<Expression>,
-    }
+    },
 }
 
 impl Expression {
@@ -895,25 +917,28 @@ impl Expression {
         match self {
             Expression::BinaryOp { op, lhs, rhs } => {
                 let Some(lhterm) = lhs.as_term() else {
-                    return false
+                    return false;
                 };
                 let Some(rhterm) = rhs.as_term() else {
-                    return false
+                    return false;
                 };
                 if !lhterm.is_static() {
-                    return false
+                    return false;
                 }
                 if !rhterm.is_static() {
-                    return false
+                    return false;
                 }
-                matches!(op, BinaryOp::Eq |
-                    BinaryOp::NotEq |
-                    BinaryOp::Less |
-                    BinaryOp::Greater |
-                    BinaryOp::LessEq |
-                    BinaryOp::GreaterEq |
-                    BinaryOp::And |
-                    BinaryOp::Or)
+                matches!(
+                    op,
+                    BinaryOp::Eq
+                        | BinaryOp::NotEq
+                        | BinaryOp::Less
+                        | BinaryOp::Greater
+                        | BinaryOp::LessEq
+                        | BinaryOp::GreaterEq
+                        | BinaryOp::And
+                        | BinaryOp::Or
+                )
             },
             _ => false,
         }
@@ -942,7 +967,7 @@ impl Expression {
             },
             Expression::AssignOp { op, lhs: _, rhs } => {
                 if let AssignOp::Assign = op {
-                    return match rhs.as_term() {
+                    match rhs.as_term() {
                         Some(term) => term.is_truthy(),
                         _ => None,
                     }
@@ -957,7 +982,7 @@ impl Expression {
                 } else {
                     else_.is_truthy()
                 }
-            }
+            },
         }
     }
 
@@ -969,8 +994,8 @@ impl Expression {
                 } else {
                     term.elem.nameof()
                 }
-            }
-            _ => None
+            },
+            _ => None,
         }
     }
 }
@@ -1010,7 +1035,7 @@ pub enum Term {
     __PROC__,
     /// A reference to the current proc/scope's type
     __TYPE__,
-     /// If rhs of an assignment op, this is a reference to the lhs var's type
+    /// If rhs of an assignment op, this is a reference to the lhs var's type
     /// If we're used as the second arg of an istype then it's the implied type of the first arg
     /// Second case takes precedence over the first, but we don't properly implement because it would be impossible to
     /// Tell. You can't DO anything to the __IMPLIED_TYPE__ so we don't really need to care about it
@@ -1055,7 +1080,7 @@ pub enum Term {
     /// An `input` call.
     Input {
         args: Box<[Expression]>,
-        input_type: Option<InputType>, // as
+        input_type: Option<InputType>,    // as
         in_list: Option<Box<Expression>>, // in
     },
     /// A `locate` call.
@@ -1069,8 +1094,8 @@ pub enum Term {
     DynamicCall(Box<[Expression]>, Box<[Expression]>),
     /// A use of the `call_ext()()` primitive.
     ExternalCall {
-        library_name: Box<Expression>,
-        function_name: Box<Expression>,
+        library: Option<Box<Expression>>,
+        function: Box<Expression>,
         args: Box<[Expression]>,
     },
     /// Unscoped `::A` is a shorthand for `global.A`
@@ -1081,12 +1106,9 @@ pub enum Term {
 
 impl Term {
     pub fn is_static(&self) -> bool {
-        matches!(self,
-            Term::Null
-            | Term::Int(_)
-            | Term::Float(_)
-            | Term::String(_)
-            | Term::Prefab(_)
+        matches!(
+            self,
+            Term::Null | Term::Int(_) | Term::Float(_) | Term::String(_) | Term::Prefab(_)
         )
     }
 
@@ -1128,18 +1150,18 @@ impl Term {
             if let Term::Int(o) = *other {
                 // edge case
                 if i == 0 && o == 0 {
-                    return Some(false)
+                    return Some(false);
                 }
                 if let Some(stepexp) = step {
                     if let Some(stepterm) = stepexp.as_term() {
                         if let Term::Int(_s) = stepterm {
-                            return Some(true)
+                            return Some(true);
                         }
                     } else {
-                        return Some(true)
+                        return Some(true);
                     }
                 }
-                return Some(i <= o)
+                return Some(i <= o);
             }
         }
         None
@@ -1159,13 +1181,15 @@ impl Term {
 impl From<Expression> for Term {
     fn from(expr: Expression) -> Term {
         match expr {
-            Expression::Base { term, follow } => if follow.is_empty() {
-                match term.elem {
-                    Term::Expr(expr) => Term::from(*expr),
-                    other => other,
+            Expression::Base { term, follow } => {
+                if follow.is_empty() {
+                    match term.elem {
+                        Term::Expr(expr) => Term::from(*expr),
+                        other => other,
+                    }
+                } else {
+                    Term::Expr(Box::new(Expression::Base { term, follow }))
                 }
-            } else {
-                Term::Expr(Box::new(Expression::Base { term, follow }))
             },
             other => Term::Expr(Box::new(other)),
         }
@@ -1240,7 +1264,7 @@ impl fmt::Display for Parameter {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(fmt, "{}{}", self.var_type, self.name)?;
         if let Some(input_type) = self.input_type {
-            write!(fmt, " as {}", input_type)?;
+            write!(fmt, " as {input_type}")?;
         }
         Ok(())
     }
@@ -1267,7 +1291,7 @@ impl VarType {
 }
 
 impl FromIterator<String> for VarType {
-    fn from_iter<T: IntoIterator<Item=String>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
         VarTypeBuilder::from_iter(iter).build()
     }
 }
@@ -1308,7 +1332,7 @@ impl VarTypeBuilder {
 }
 
 impl FromIterator<String> for VarTypeBuilder {
-    fn from_iter<T: IntoIterator<Item=String>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
         let mut flags = VarTypeFlags::default();
         let type_path = iter
             .into_iter()
@@ -1378,7 +1402,7 @@ pub enum Statement {
     },
     If {
         arms: Vec<(Spanned<Expression>, Block)>,
-        else_arm: Option<Block>
+        else_arm: Option<Block>,
     },
     ForInfinite {
         block: Block,
@@ -1390,13 +1414,14 @@ pub enum Statement {
         block: Block,
     },
     ForList(Box<ForListStatement>),
+    ForKeyValue(Box<ForKeyValueStatement>),
     ForRange(Box<ForRangeStatement>),
     Var(Box<VarStatement>),
     Vars(Vec<VarStatement>),
     Setting {
         name: Ident2,
         mode: SettingMode,
-        value: Expression
+        value: Expression,
     },
     Spawn {
         delay: Option<Expression>,
@@ -1448,6 +1473,17 @@ pub struct ForListStatement {
 }
 
 #[derive(Debug, Clone, PartialEq, GetSize)]
+pub struct ForKeyValueStatement {
+    pub var_type: Option<VarType>,
+    pub key: Ident2,
+    pub key_input_type: Option<InputType>,
+    pub value: Ident2,
+    /// Defaults to 'world'.
+    pub in_list: Option<Expression>,
+    pub block: Block,
+}
+
+#[derive(Debug, Clone, PartialEq, GetSize)]
 pub struct ForRangeStatement {
     pub var_type: Option<VarType>,
     pub name: Ident2,
@@ -1479,7 +1515,7 @@ pub static VALID_FILTER_TYPES: phf::Map<&'static str, &[&str]> = phf_map! {
     "angular_blur" => &[ "x", "y", "size" ],
     "bloom" => &[ "threshold", "size", "offset", "alpha" ],
     "color" => &[ "color", "space" ],
-    "displace" => &[ "x", "y", "size", "icon", "render_source" ],
+    "displace" => &[ "x", "y", "size", "icon", "render_source", "flags" ],
     "drop_shadow" => &[ "x", "y", "size", "offset", "color"],
     "blur" => &[ "size" ],
     "layer" => &[ "x", "y", "icon", "render_source", "flags", "color", "transform", "blend_mode" ],
@@ -1495,6 +1531,7 @@ pub static VALID_FILTER_TYPES: phf::Map<&'static str, &[&str]> = phf_map! {
 pub static VALID_FILTER_FLAGS: phf::Map<&'static str, (&str, bool, bool, &[&str])> = phf_map! {
     "alpha" => ("flags", false, true, &[ "MASK_INVERSE", "MASK_SWAP" ]),
     "color" => ("space", true, false, &[ "FILTER_COLOR_RGB", "FILTER_COLOR_HSV", "FILTER_COLOR_HSL", "FILTER_COLOR_HCY" ]),
+    "displace" => ("flags", false, true, &[ "FILTER_OVERLAY" ]),
     "layer" => ("flags", true, true, &[ "FILTER_OVERLAY", "FILTER_UNDERLAY" ]),
     "rays" => ("flags", false, true, &[ "FILTER_OVERLAY", "FILTER_UNDERLAY" ]),
     "outline" => ("flags", false, true, &[ "OUTLINE_SHARP", "OUTLINE_SQUARE" ]),

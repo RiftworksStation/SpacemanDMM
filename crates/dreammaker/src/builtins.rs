@@ -8,58 +8,70 @@ use super::objtree::*;
 use super::preprocessor::{Define, DefineMap};
 use super::Location;
 
-const DM_VERSION: i32 = 515;
-const DM_BUILD: i32 = 1619;
+const DM_VERSION: i32 = 516;
+const DM_BUILD: i32 = 1666;
 
 /// Register BYOND builtin macros to the given define map.
 pub fn default_defines(defines: &mut DefineMap) {
-    use super::lexer::*;
     use super::lexer::Token::*;
+    use super::lexer::*;
     let location = Location::builtins();
 
     // #define EXCEPTION(value) new /exception(value)
-    defines.insert("EXCEPTION".to_owned(), (location, Define::Function {
-        params: vec!["value".to_owned()],
-        variadic: false,
-        subst: vec![
-            Ident("new".to_owned(), true),
-            Punct(Punctuation::Slash),
-            Ident("exception".to_owned(), false),
-            Punct(Punctuation::LParen),
-            Ident("value".to_owned(), false),
-            Punct(Punctuation::RParen),
-        ],
-        docs: Default::default(),
-    }));
+    defines.insert(
+        "EXCEPTION".to_owned(),
+        (
+            location,
+            Define::Function {
+                params: vec!["value".to_owned()],
+                variadic: false,
+                subst: vec![
+                    Ident("new".to_owned(), true),
+                    Punct(Punctuation::Slash),
+                    Ident("exception".to_owned(), false),
+                    Punct(Punctuation::LParen),
+                    Ident("value".to_owned(), false),
+                    Punct(Punctuation::RParen),
+                ],
+                docs: Default::default(),
+            },
+        ),
+    );
 
     // #define ASSERT(expression) if (!(expression)) { CRASH("[__FILE__]:[__LINE__]:Assertion Failed: [#X]") }
-    defines.insert("ASSERT".to_owned(), (location, Define::Function {
-        params: vec!["expression".to_owned()],
-        variadic: false,
-        subst: vec![
-            Ident("if".to_owned(), true),
-            Punct(Punctuation::LParen),
-            Punct(Punctuation::Not),
-            Punct(Punctuation::LParen),
-            Ident("expression".to_owned(), false),
-            Punct(Punctuation::RParen),
-            Punct(Punctuation::RParen),
-            Punct(Punctuation::LBrace),
-            Ident("CRASH".to_owned(), false),
-            Punct(Punctuation::LParen),
-            InterpStringBegin("".to_owned()),
-            Ident("__FILE__".to_owned(), false),
-            InterpStringPart(":".to_owned()),
-            Ident("__LINE__".to_owned(), false),
-            InterpStringPart(":Assertion Failed: ".to_owned()),
-            Punct(Punctuation::Hash),
-            Ident("expression".to_owned(), false),
-            InterpStringEnd("".to_owned()),
-            Punct(Punctuation::RParen),
-            Punct(Punctuation::RBrace),
-        ],
-        docs: Default::default(),
-    }));
+    defines.insert(
+        "ASSERT".to_owned(),
+        (
+            location,
+            Define::Function {
+                params: vec!["expression".to_owned()],
+                variadic: false,
+                subst: vec![
+                    Ident("if".to_owned(), true),
+                    Punct(Punctuation::LParen),
+                    Punct(Punctuation::Not),
+                    Punct(Punctuation::LParen),
+                    Ident("expression".to_owned(), false),
+                    Punct(Punctuation::RParen),
+                    Punct(Punctuation::RParen),
+                    Punct(Punctuation::LBrace),
+                    Ident("CRASH".to_owned(), false),
+                    Punct(Punctuation::LParen),
+                    InterpStringBegin("".to_owned()),
+                    Ident("__FILE__".to_owned(), false),
+                    InterpStringPart(":".to_owned()),
+                    Ident("__LINE__".to_owned(), false),
+                    InterpStringPart(":Assertion Failed: ".to_owned()),
+                    Punct(Punctuation::Hash),
+                    Ident("expression".to_owned(), false),
+                    InterpStringEnd("".to_owned()),
+                    Punct(Punctuation::RParen),
+                    Punct(Punctuation::RBrace),
+                ],
+                docs: Default::default(),
+            },
+        ),
+    );
 
     // constants
     macro_rules! c {
@@ -149,6 +161,7 @@ pub fn default_defines(defines: &mut DefineMap) {
         ANIMATION_LINEAR_TRANSFORM = Int(2);
         ANIMATION_PARALLEL = Int(4);
         ANIMATION_SLICE = Int(8); // 515
+        ANIMATION_END_LOOP = Int(16); // 516
         ANIMATION_RELATIVE = Int(256);
         ANIMATION_CONTINUE = Int(512); // 515
 
@@ -403,7 +416,7 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         proc/abs(A);
         proc/addtext(Arg1, Arg2/*, ...*/);
         proc/alert(Usr/*=usr*/,Message,Title,Button1/*="Ok"*/,Button2,Button3);
-        proc/animate(Object, time, loop, easing, flags, delay, // +2 forms
+        proc/animate(Object, time, loop, easing, flags, delay, tag, command, // +2 forms
             // these kwargs
             alpha, color, infra_luminosity, layer, maptext_width, maptext_height,
             maptext_x, maptext_y, luminosity, pixel_x, pixel_y, pixel_w, pixel_z,
@@ -451,7 +464,8 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
             repeat,
             radius,
             falloff,
-            alpha
+            alpha,
+            name // 516
         );
         proc/findlasttext(Haystack,Needle,Start=0,End=1);
         proc/findlasttextEx(Haystack,Needle,Start=0,End=1);
@@ -474,7 +488,7 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         proc/html_encode(PlainText);
         proc/icon(icon,icon_state,dir,frame,moving);  // SNA
         proc/icon_states(Icon, mode=0);
-        proc/image(icon,loc,icon_state,layer,dir,pixel_x,pixel_y);  // SNA
+        proc/image(icon,loc,icon_state,layer,dir,pixel_x,pixel_y,pixel_w,pixel_z);  // SNA
         proc/initial(Var);  // special form
         proc/input(Usr=usr,Message,Title,Default)/*as Type in List*/;  // special form
         proc/isarea(Loc1, Loc2/*,...*/);
@@ -576,6 +590,12 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         proc/winshow(player, window, show=1);
         proc/CRASH(message);  // kind of special, but let's pretend
 
+        proc/values_cut_over(Alist, Max, inclusive=0);
+        proc/values_cut_under(Alist, Max, inclusive=0);
+        proc/values_dot(A, B);
+        proc/values_product(Alist);
+        proc/values_sum(Alist);
+
         // database builtin procs
         proc/_dm_db_new_query();
         proc/_dm_db_execute(db_query, sql_query, db_connection, cursor_handler, unknown);
@@ -618,6 +638,7 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         list/var/const/parent_type;
         list/var/tag;
         list/var/const/list/vars;
+        list/proc/operator[]();
         list/proc/Add(Item1, Item2/*,...*/);
         list/proc/Copy(Start=1, End=0);
         list/proc/Cut(Start=1, End=0);
@@ -628,6 +649,23 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         list/proc/Splice(Start=1, End=0, Item1, Item2/*,...*/); // 514
         list/proc/Swap(Index1, Index2);
         list/var/len;
+
+        // 516
+        alist;
+        alist/var/const/type;
+        alist/var/const/parent_type;
+        alist/var/tag;
+        alist/proc/operator[]();
+        alist/proc/Add(Item1, Item2/*,...*/);
+        alist/proc/Copy(Start=1, End=0);
+        alist/proc/Cut(Start=1, End=0);
+        alist/proc/Find(Elem, Start=1, End=0);
+        alist/proc/Insert(Index, Item1, Item2/*,...*/);
+        alist/proc/Join(Glue, Start=1, End=0);
+        alist/proc/Remove(Item1, Item2/*,...*/);
+        alist/proc/Splice(Start=1, End=0, Item1, Item2/*,...*/);
+        alist/proc/Swap(Index1, Index2);
+        alist/var/len;
 
         atom/parent_type = path!(/datum);
         atom/var/alpha = int!(255);
@@ -666,6 +704,12 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         atom/var/pixel_y = int!(0);
         atom/var/pixel_w = int!(0);
         atom/var/pixel_z = int!(0);
+
+        // 516
+        atom/var/icon_w = int!(0);
+        atom/var/icon_z = int!(0);
+        atom/var/pixloc/pixloc;
+
         atom/var/plane = int!(0);
         atom/var/suffix;
         atom/var/text;
@@ -913,6 +957,11 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         // only used by client.SoundQuery() for now:
         sound/var/offset = int!(0);
         sound/var/len = int!(0);
+
+        // 516
+        sound/var/tmp/atom/atom;
+        sound/var/transform;
+
         sound/New(file, repeat, wait, channel, volume);
 
         icon;
@@ -1015,6 +1064,11 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         image/var/pixel_y;
         image/var/pixel_w;
         image/var/pixel_z;
+
+        // 516
+        image/var/icon_w;
+        image/var/icon_z;
+
         image/var/plane;
         image/var/render_source;
         image/var/render_target;
@@ -1070,6 +1124,7 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         savefile/var/list/dir;
         savefile/var/eof;
         savefile/var/name;
+        savefile/proc/operator[]();
         savefile/proc/ExportText(/* path=cd, file */);
         savefile/proc/Flush();
         savefile/proc/ImportText(/* path=cd, file */);
@@ -1187,6 +1242,7 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         proc/refcount(Object);
         proc/trimtext(Text);
         proc/trunc(A);
+        proc/bound_pixloc(Atom, Dir);
 
         client/proc/RenderIcon(object);
 
@@ -1200,6 +1256,53 @@ pub fn register_builtins(tree: &mut ObjectTreeBuilder) {
         list/proc/RemoveAll(Item1/*, ...*/);
 
         world/proc/Tick();
+
+        // 516
+        proc/lerp(A, B, factor);
+        proc/sign(A);
+        proc/astype(Val, Type);
+        proc/alist(A/* =a */,B/* =b */,C/* =c */);
+
+        proc/load_ext(LibName, FuncName);
+
+        callee;
+        callee/var/args;
+        callee/var/callee/caller;
+        callee/var/category;
+        callee/var/desc;
+        callee/var/file;
+        callee/var/name;
+        callee/var/line;
+        callee/var/proc;
+        callee/var/src;
+        callee/var/type;
+        callee/var/usr;
+
+        proc/pixloc(x, y, z);
+
+        pixloc;
+        pixloc/var/atom/loc;
+        pixloc/var/step_x;
+        pixloc/var/step_y;
+        pixloc/var/x;
+        pixloc/var/y;
+        pixloc/var/z;
+
+        proc/vector(x, y, z);
+
+        vector;
+        vector/var/len;
+        vector/var/size;
+        vector/var/x;
+        vector/var/y;
+        vector/var/z;
+
+        vector/proc/operator[]();
+        vector/proc/Cross(B);
+        vector/proc/Dot(B);
+        vector/proc/Interpolate(B, t);
+        vector/proc/Normalize();
+        vector/proc/Turn(B);
     };
 }
 

@@ -19,9 +19,9 @@ fn files_with_extension<F: FnMut(&Path)>(ext: &str, mut f: F) {
     let dir = match std::env::var_os("TEST_DME") {
         Some(dme) => Path::new(&dme).parent().unwrap().to_owned(),
         None => {
-            println!("Set TEST_DME to check .{} files", ext);
+            println!("Set TEST_DME to check .{ext} files");
             return;
-        }
+        },
     };
     for entry in WalkDir::new(dir).into_iter().filter_entry(is_visible) {
         let entry = entry.unwrap();

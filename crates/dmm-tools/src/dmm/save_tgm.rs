@@ -5,13 +5,14 @@ use ndarray::Axis;
 
 use super::Map;
 
-const TGM_HEADER: &str = "//MAP CONVERTED BY dmm2tgm.py THIS HEADER COMMENT PREVENTS RECONVERSION, DO NOT REMOVE";
+const TGM_HEADER: &str =
+    "//MAP CONVERTED BY dmm2tgm.py THIS HEADER COMMENT PREVENTS RECONVERSION, DO NOT REMOVE";
 
 // Note: writeln! currently (2022-04-30) writes the \n character alone on all platforms
 // If that changes, this will break.
 pub fn save_tgm(map: &Map, w: &mut impl Write) -> io::Result<()> {
     let mut f = BufWriter::new(w);
-    writeln!(f, "{}", TGM_HEADER)?;
+    writeln!(f, "{TGM_HEADER}")?;
 
     // dictionary
     for (&key, prefabs) in map.dictionary.iter() {
@@ -21,7 +22,7 @@ pub fn save_tgm(map: &Map, w: &mut impl Write) -> io::Result<()> {
             if !fab.vars.is_empty() {
                 write!(f, "{{")?;
                 for (i, (var, value)) in fab.vars.iter().enumerate() {
-                    write!(f, "\n\t{} = {}", var, value)?;
+                    write!(f, "\n\t{var} = {value}")?;
                     if i + 1 != fab.vars.len() {
                         write!(f, ";")?;
                     }

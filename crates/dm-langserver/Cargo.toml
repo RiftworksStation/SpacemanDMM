@@ -1,8 +1,8 @@
 [package]
 name = "dm-langserver"
-version = "1.9.0"
-authors = ["Tad Hardesty <tad@platymuus.com>"]
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [dependencies]
 url = "2.5.2"
@@ -19,16 +19,13 @@ interval-tree = { path = "../interval-tree" }
 libc = "0.2.161"
 regex = "1.11.1"
 lazy_static = "1.5"
-foldhash = "0.1.3"
+foldhash = "0.2.0"
 
 [build-dependencies]
 chrono = "0.4.38"
-git2 = { version = "0.19.0", default-features = false }
+git2 = { version = "0.20.2", default-features = false }
 sha256 = { version = "1.5.0", default-features = false }
 ureq = "2.10.1"
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(auxtools_bundle)',
-    'cfg(extools_bundle)',
-] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(auxtools_bundle)', 'cfg(extools_bundle)'] }

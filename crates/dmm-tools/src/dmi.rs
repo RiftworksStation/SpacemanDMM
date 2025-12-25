@@ -65,7 +65,7 @@ impl IconFile {
         self.metadata.get_icon_state(icon_state).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("icon_state {} not found", icon_state),
+                format!("icon_state {icon_state} not found"),
             )
         })
     }
@@ -124,9 +124,7 @@ impl Image {
         Image {
             width,
             height,
-            data: {
-                Array2::default((width as usize, height as usize))
-            },
+            data: { Array2::default((width as usize, height as usize)) },
         }
     }
 
@@ -244,10 +242,7 @@ impl Image {
                 let src = other_dat[(sy * other.width + sx) as usize];
                 macro_rules! tint {
                     ($i:expr) => {
-                        mul255(
-                            src[$i],
-                            color[$i],
-                        )
+                        mul255(src[$i], color[$i])
                     };
                 }
                 let dst = &mut self_dat[(y * self.width + x) as usize];

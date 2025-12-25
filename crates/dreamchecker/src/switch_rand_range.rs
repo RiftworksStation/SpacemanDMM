@@ -30,7 +30,7 @@ pub fn check_switch_rand_range(
                 if start <= rand_end && end >= rand_start {
                     case_ranges.push((start, end));
                 } else {
-                    DMError::new(location, format!("Case range '{} to {}' will never trigger as it is outside the rand() range {} to {}", start, end, rand_start, rand_end))
+                    DMError::new(location, format!("Case range '{start} to {end}' will never trigger as it is outside the rand() range {rand_start} to {rand_end}"))
                         .with_component(dm::Component::DreamChecker)
                         .set_severity(Severity::Warning)
                         .register(context);
@@ -58,8 +58,7 @@ pub fn check_switch_rand_range(
         DMError::new(
             location,
             format!(
-                "Switch branches on rand() with range {} to {} but no case branch triggers for {}",
-                rand_start, rand_end, first_uncovered
+                "Switch branches on rand() with range {rand_start} to {rand_end} but no case branch triggers for {first_uncovered}"
             ),
         )
         .with_component(dm::Component::DreamChecker)
@@ -77,21 +76,18 @@ fn get_case_range(case: &Case, location: Location) -> Option<(f32, f32)> {
                 .ok()?
                 .to_float()?;
             Some((value, value))
-        }
+        },
         Case::Range(ref min, ref max) => {
             let min = min.to_owned().simple_evaluate(location).ok()?.to_float()?;
             let max = max.to_owned().simple_evaluate(location).ok()?.to_float()?;
             Some((min, max))
-        }
+        },
     }
 }
 
 fn get_rand_range(maybe_rand: &Expression) -> Option<(i32, i32)> {
     let (term, location) = match maybe_rand {
-        Expression::Base {
-            term,
-            follow,
-        } if follow.is_empty() => (&term.elem, term.location),
+        Expression::Base { term, follow } if follow.is_empty() => (&term.elem, term.location),
         _ => return None,
     };
 
