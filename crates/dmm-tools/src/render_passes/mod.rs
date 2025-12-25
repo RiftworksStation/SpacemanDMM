@@ -675,12 +675,12 @@ impl FancyLayers {
 pub struct BandaStationMods;
 impl RenderPass for BandaStationMods {
     fn path_filter(&self, path: &str) -> bool {
-        if subpath(path, "/obj/") {
+        if ispath(path, "/obj/") {
             let guaranteed_removals = [
                 "/obj/effect/turf_decal/weather/",
             ];
 
-            if guaranteed_removals.iter().any(|&p| subpath(path, p)) {
+            if guaranteed_removals.iter().any(|&p| ispath(path, p)) {
                 return false;
             }
 
@@ -697,12 +697,12 @@ impl RenderPass for BandaStationMods {
                 "/obj/effect/spawner/structure/window/",
             ];
 
-            if !exceptions.iter().any(|&p| subpath(path, p)) {
+            if !exceptions.iter().any(|&p| ispath(path, p)) {
                 return false;
             }
         }
 
-        if subpath(path, "/turf/") {
+        if ispath(path, "/turf/") {
             let removals = [
                 "/turf/open/genturf/",
                 "/turf/closed/mineral/random/snow/",
@@ -718,12 +718,12 @@ impl RenderPass for BandaStationMods {
 
             ];
 
-            if removals.iter().any(|&p| subpath(path, p)) {
+            if removals.iter().any(|&p| ispath(path, p)) {
                 return false;
             }
         }
 
-        if subpath(path, "/mob/") {
+        if ispath(path, "/mob/") {
             return false;
         }
 
